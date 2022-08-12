@@ -1,0 +1,3 @@
+[submodule "lib/elmo_driver"]
+	path = lib/elmo_driver
+	url = https://www.lejuhub.com/fuyou/elmo_driver.git
