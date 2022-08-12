@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.0.0)
+project(pendulum VERSION 0.1.0)
+
+set(CMAKE_BUILD_TYPE "Release")
+
+find_package(drake CONFIG REQUIRED)
+find_package(lcm CONFIG REQUIRED)
+
+include_directories(../common)
+include_directories(./)
+
+set(SRCS
+  ../common/utils.cpp
+  ../common/force_disturber.cc
+  ./make_pendulum_plant.cc
+)
+add_executable(${PROJECT_NAME}_lqr ${SRCS} ./lqr_control.cc)
+target_link_libraries(${PROJECT_NAME}_lqr pthread gflags drake::drake)
