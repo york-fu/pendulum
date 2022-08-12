@@ -189,7 +189,7 @@ void HardwarePlantDeInit()
 
 namespace drake
 {
-  HardwarePlant::HardwarePlant(multibody::MultibodyPlant<double> *plant)
+  HardwarePlant::HardwarePlant(multibody::MultibodyPlant<double> *plant) : plant_(plant)
   {
     plant_context_ = plant_->CreateDefaultContext();
     na_ = plant_->num_actuated_dofs();
@@ -227,7 +227,7 @@ namespace drake
     auto actuation = actuation_cache_->Eval<systems::BasicVector<double>>(context).get_value();
     writeJoint(na_, actuation);
 
-    lcmPublishState(lcm_ptr, "state", q, v, vdot);
+    lcmPublishState(lcm_ptr, "state", q, v, vdot, false);
     lcmPublishVector(lcm_ptr, "state/tau", tau);
 
     clock_gettime(CLOCK_MONOTONIC, &t1);

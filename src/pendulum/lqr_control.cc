@@ -24,16 +24,127 @@
 #include "make_pendulum_plant.h"
 #include "force_disturber.h"
 #include "hardware_plant.h"
+#include "lcm_publish.h"
 
 DEFINE_double(dt, 1.0e-3, "Control period.");
 DEFINE_double(realtime, 1.0, "Target realtime rate.");
-DEFINE_double(simtime, 60.0, "Simulation time.");
+DEFINE_double(simtime, 6e2, "Simulation time.");
 DEFINE_bool(pid, false, "Use PID.");
 DEFINE_double(theta, M_PI, "Desired angle.");
 DEFINE_bool(pub, true, "Publish lcm msg");
 DEFINE_bool(real, false, "Run real");
 
 lcm::LCM lc;
+
+namespace drake
+{
+  class StateSender : public systems::LeafSystem<double>
+  {
+  public:
+    DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(StateSender)
+
+    StateSender(multibody::MultibodyPlant<double> *plant) : plant_(plant)
+    {
+      plant_context_ = plant_->CreateDefaultContext();
+      na_ = plant_->num_actuated_dofs();
+      nq_ = plant_->num_positions();
+      nv_ = plant_->num_velocities();
+      dt_ = plant_->time_step();
+      DeclareVectorInputPort("state", nq_ + nv_);
+      DeclarePeriodicDiscreteUpdateEvent(dt_, 0, &StateSender::Update);
+      q_.resize(nq_);
+      v_.resize(nv_);
+      vd_.resize(nv_);
+      prev_v_.resize(nv_);
+      q_.setZero();
+      v_.setZero();
+    }
+
+    const systems::InputPort<double> &get_state_input_port() const
+    {
+      return systems::LeafSystem<double>::get_input_port(0);
+    }
+
+  private:
+    void Update(const systems::Context<double> &context, systems::DiscreteValues<double> *next_state) const
+    {
+      const auto &qv = get_state_input_port().Eval(context);
+      prev_v_ = v_;
+      q_ = qv.segment(0, nq_);
+      v_ = qv.segment(nq_, nv_);
+      vd_ = (v_ - prev_v_) / dt_;
+
+      if (FLAGS_pub)
+      {
+        lcmPublishState(&lc, "state", q_, v_, vd_, false);
+      }
+    }
+
+    multibody::MultibodyPlant<double> *plant_;
+    std::unique_ptr<systems::Context<double>> plant_context_;
+    int32_t na_;
+    int32_t nq_;
+    int32_t nv_;
+    double dt_;
+    mutable Eigen::VectorXd q_, v_, vd_;
+    mutable Eigen::VectorXd prev_v_;
+  };
+} // namespace drake
+
+namespace drake
+{
+  class CommandSender : public systems::LeafSystem<double>
+  {
+  public:
+    DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(CommandSender)
+
+    CommandSender(multibody::MultibodyPlant<double> *plant) : plant_(plant)
+    {
+      plant_context_ = plant_->CreateDefaultContext();
+      na_ = plant_->num_actuated_dofs();
+      nq_ = plant_->num_positions();
+      nv_ = plant_->num_velocities();
+      dt_ = plant_->time_step();
+      DeclareVectorInputPort("command", nq_ + nv_);
+      DeclarePeriodicDiscreteUpdateEvent(dt_, 0, &CommandSender::Update);
+      q_.resize(nq_);
+      v_.resize(nv_);
+      vd_.resize(nv_);
+      prev_v_.resize(nv_);
+      q_.setZero();
+      v_.setZero();
+    }
+
+    const systems::InputPort<double> &get_desired_input_port() const
+    {
+      return systems::LeafSystem<double>::get_input_port(0);
+    }
+
+  private:
+    void Update(const systems::Context<double> &context, systems::DiscreteValues<double> *next_state) const
+    {
+      const auto &qv_des = get_desired_input_port().Eval(context);
+      prev_v_ = v_;
+      q_ = qv_des.segment(0, nq_);
+      v_ = qv_des.segment(nq_, nv_);
+      vd_ = (v_ - prev_v_) / dt_;
+
+      if (FLAGS_pub)
+      {
+        lcmPublishState(&lc, "desire", q_, v_, vd_, false);
+      }
+    }
+
+    multibody::MultibodyPlant<double> *plant_;
+    std::unique_ptr<systems::Context<double>> plant_context_;
+    int32_t na_;
+    int32_t nq_;
+    int32_t nv_;
+    double dt_;
+    mutable Eigen::VectorXd q_, v_, vd_;
+    mutable Eigen::VectorXd prev_v_;
+  };
+} // namespace drake
 
 namespace drake
 {
@@ -47,6 +158,9 @@ namespace drake
 
     builder.Connect(plant->get_geometry_poses_output_port(), scene_graph->get_source_pose_port(plant->get_source_id().value()));
     geometry::DrakeVisualizerd::AddToBuilder(&builder, *scene_graph, lcm);
+
+
+    auto state_sender = builder.AddSystem<StateSender>(plant);
 
     HardwarePlant *hard_plant;
     if (FLAGS_real)
@@ -80,11 +194,13 @@ namespace drake
       {
         builder.Connect(plant->get_state_output_port(), lqr->get_input_port());
         builder.Connect(lqr->get_output_port(), plant->get_actuation_input_port());
+        builder.Connect(plant->get_state_output_port(), state_sender->get_state_input_port());
       }
       else
       {
         builder.Connect(hard_plant->get_state_output_port(), lqr->get_input_port());
         builder.Connect(lqr->get_output_port(), hard_plant->get_actuation_input_port());
+        builder.Connect(hard_plant->get_state_output_port(), state_sender->get_state_input_port());
       }
     }
     else
@@ -100,17 +216,19 @@ namespace drake
       {
         builder.Connect(plant->get_state_output_port(), controller->get_input_port_estimated_state());
         builder.Connect(controller->get_output_port_control(), plant->get_actuation_input_port());
+        builder.Connect(plant->get_state_output_port(), state_sender->get_state_input_port());
       }
       else
       {
         builder.Connect(hard_plant->get_state_output_port(), controller->get_input_port_estimated_state());
         builder.Connect(controller->get_output_port_control(), hard_plant->get_actuation_input_port());
+        builder.Connect(hard_plant->get_state_output_port(), state_sender->get_state_input_port());
       }
     }
 
     Eigen::Matrix<double, 6, 1> disturb;
-    disturb << 0, 50, 0, 0, 0, 0;
-    auto force_disturber = builder.AddSystem<ForceDisturber>(plant->GetBodyByName(parameters.body_name()).index(), disturb, 4, 0.1, 4);
+    disturb << 0, 20, 0, 0, 0, 0;
+    auto force_disturber = builder.AddSystem<ForceDisturber>(plant->GetBodyByName(parameters.body_name()).index(), disturb, 4, 0.2, 4);
     builder.Connect(force_disturber->get_output_port(), plant->get_applied_spatial_force_input_port());
 
     auto diagram = builder.Build();
