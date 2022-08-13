@@ -18,6 +18,9 @@ make -j`nproc`
 # Run
 
 Start-up drake-visualizer
+```
+/opt/drake/bin/drake-visualizer
+```
 
 ```
 cd build
