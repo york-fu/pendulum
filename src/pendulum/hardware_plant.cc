@@ -43,11 +43,13 @@ static double calcCos(double start, double stop, double T, double t)
 void jointMoveTo(std::vector<double> &goal_pos, double speed, double dt)
 {
   actuators.getJointData(joint_ids, num_joint, joint_data);
+  std::vector<double> start_pos(num_joint, 0);
   std::vector<double> T(num_joint, 0);
   for (uint32 i = 0; i < num_joint; i++)
   {
-    T[i] = (goal_pos[i] - joint_data[i].position) / speed;
-    printf("Joint %d from %f to %f\n", i + 1, joint_data[i].position, goal_pos[i]);
+    start_pos[i] = joint_data[i].position;
+    T[i] = fabs(goal_pos[i] - start_pos[i]) / speed;
+    printf("Joint %d from %f to %f\n", i + 1, start_pos[i], goal_pos[i]);
   }
   double max_T = *max_element(T.begin(), T.end());
   if (max_T < 0.5)
@@ -63,7 +65,7 @@ void jointMoveTo(std::vector<double> &goal_pos, double speed, double dt)
   {
     for (uint32 i = 0; i < num_joint; i++)
     {
-      joint_cmd[i].position = calcCos(joint_data[i].position, goal_pos[i], total_cnt, count);
+      joint_cmd[i].position = calcCos(start_pos[i], goal_pos[i], total_cnt, count);
       joint_cmd[i].maxTorque = MAX_CURRENT;
     }
     actuators.setJointPosition(joint_ids, num_joint, joint_cmd);
@@ -100,10 +102,10 @@ static void checkJointPos(JointParam_t *joint_data)
 }
 
 static void readJoint(uint32_t na, double dt,
-                      Eigen::VectorXd joint_q,
-                      Eigen::VectorXd joint_v,
-                      Eigen::VectorXd joint_vd,
-                      Eigen::VectorXd joint_tau)
+                      Eigen::VectorXd &joint_q,
+                      Eigen::VectorXd &joint_v,
+                      Eigen::VectorXd &joint_vd,
+                      Eigen::VectorXd &joint_tau)
 {
   for (uint32_t i = 0; i < na; i++)
   {
@@ -121,7 +123,7 @@ static void readJoint(uint32_t na, double dt,
   }
 }
 
-static void writeJoint(uint32_t na, Eigen::VectorXd cmd)
+static void writeJoint(uint32_t na, const Eigen::VectorXd &cmd)
 {
   for (uint32_t i = 0; i < na; i++)
   {
@@ -224,7 +226,7 @@ namespace drake
     qv << q, v;
     next_state->set_value(qv);
 
-    auto actuation = actuation_cache_->Eval<systems::BasicVector<double>>(context).get_value();
+    const auto actuation = actuation_cache_->Eval<systems::BasicVector<double>>(context).get_value();
     writeJoint(na_, actuation);
 
     lcmPublishState(lcm_ptr, "state", q, v, vdot, false);
