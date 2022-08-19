@@ -23,6 +23,7 @@ Start-up drake-visualizer
 ```
 
 ```
+ldconfig
 cd build
 ./src/pendulum/pendulum_lqr
 ```

@@ -16,7 +16,7 @@ DECLARE_bool(pub);
 #define MAX_TORQUE (44.14)
 #define MAX_CURRENT (MAX_TORQUE / C2T_COEFFICIENT)
 
-const char *ifname = "enp2s0";
+const char *ifname = "eno1";
 uint32_t encoder_range[] = {BIT_17_9, BIT_17_9, BIT_17_9, BIT_17_9, BIT_17_9, BIT_17_9,
                             BIT_17_9, BIT_17_9, BIT_17_9, BIT_17_9, BIT_17_9, BIT_17_9};
 
@@ -176,15 +176,19 @@ int8_t HardwarePlantInit(lcm::LCM &lcm_obj)
   }
   actuators.setJointOffset(joint_offset, NUM_JOINT_MAX);
 
-  std::vector<double> inital_pos(NUM_JOINT_MAX, 0);
-  jointMoveTo(inital_pos, 60, 1.0e-3);
+  // std::vector<double> inital_pos(NUM_JOINT_MAX, 0);
+  // jointMoveTo(inital_pos, 60, 1.0e-3);
   return 0;
 }
 
 void HardwarePlantDeInit()
 {
   std::vector<double> goal_pos(NUM_JOINT_MAX, 0);
-  jointMoveTo(goal_pos, 60, 1.0e-3);
+  // jointMoveTo(goal_pos, 60, 1.0e-3);
+  Eigen::VectorXd cmd(1);
+  cmd << 0;
+  writeJoint(1,cmd);
+
   usleep(1000 * 10);
   actuators.deInit();
 }

@@ -25,11 +25,12 @@
 #include "force_disturber.h"
 #include "hardware_plant.h"
 #include "lcm_publish.h"
+#include "lqrfeedforward.h"
 
 DEFINE_double(dt, 1.0e-3, "Control period.");
 DEFINE_double(realtime, 1.0, "Target realtime rate.");
 DEFINE_double(simtime, 6e2, "Simulation time.");
-DEFINE_bool(pid, false, "Use PID.");
+DEFINE_bool(pid, true, "Use PID.");
 DEFINE_double(theta, M_PI, "Desired angle.");
 DEFINE_bool(pub, true, "Publish lcm msg");
 DEFINE_bool(real, false, "Run real");
@@ -151,45 +152,44 @@ namespace drake
   int do_main()
   {
     systems::DiagramBuilder<double> builder;
-    systems::lcm::LcmInterfaceSystem *lcm = builder.AddSystem<systems::lcm::LcmInterfaceSystem>();
-    geometry::SceneGraph<double> *scene_graph = builder.AddSystem<geometry::SceneGraph>();
-    pendulum::PendulumParameters parameters(FLAGS_dt, 2, 0.4, 0.2);
-    multibody::MultibodyPlant<double> *plant = builder.AddSystem(MakePendulumPlant(parameters, scene_graph));
+    
+    geometry::SceneGraph<double> *scene_graph = builder.AddSystem<geometry::SceneGraph>();  //创建scene_graph
+    pendulum::PendulumParameters parameters(FLAGS_dt, 100, 0.5, 0.1);  //dt = 1e-3, mass = 1.0, length = 0.5, damping = 0.1, gravity = 9.81
+    multibody::MultibodyPlant<double> *plant = builder.AddSystem(MakePendulumPlant(parameters, scene_graph));  //创建plant
+    builder.Connect(plant->get_geometry_poses_output_port(), scene_graph->get_source_pose_port(plant->get_source_id().value()));  //连接plant和对应scene_graph
 
-    builder.Connect(plant->get_geometry_poses_output_port(), scene_graph->get_source_pose_port(plant->get_source_id().value()));
-    geometry::DrakeVisualizerd::AddToBuilder(&builder, *scene_graph, lcm);
+    systems::lcm::LcmInterfaceSystem *lcm = builder.AddSystem<systems::lcm::LcmInterfaceSystem>();  //创建lcm
+    geometry::DrakeVisualizerd::AddToBuilder(&builder, *scene_graph, lcm);  //
 
-
-    auto state_sender = builder.AddSystem<StateSender>(plant);
+    auto state_sender = builder.AddSystem<StateSender>(plant);  //创建state_sender
 
     HardwarePlant *hard_plant;
     if (FLAGS_real)
     {
-      hard_plant = builder.AddSystem<HardwarePlant>(plant);
+      hard_plant = builder.AddSystem<HardwarePlant>(plant);  //创建hard_plant
     }
 
     if (!FLAGS_pid)
     {
       std::cout << "Use LQR.\n";
+
       auto context = plant->CreateDefaultContext();
-      const multibody::RevoluteJoint<double> &joint = plant->GetJointByName<multibody::RevoluteJoint>(parameters.pin_joint_name());
-      joint.set_angle(context.get(), FLAGS_theta);
+      const multibody::RevoluteJoint<double> &joint = plant->GetJointByName<multibody::RevoluteJoint>(parameters.pin_joint_name());  //创建关节
+      joint.set_angle(context.get(), FLAGS_theta);  //设置关节初始角度
       Eigen::VectorXd tau(plant->num_actuated_dofs());
       tau.setZero();
       plant->get_actuation_input_port().FixValue(context.get(), tau);
       Eigen::MatrixXd Q(2, 2);
-      Q << 100, 0,
+      Q << 1, 0,
           0, 1;
       Eigen::MatrixXd R(1, 1);
       R << 0.1;
       auto N = Eigen::Matrix<double, 0, 0>::Zero();
       auto lqr = builder.AddSystem(systems::controllers::LinearQuadraticRegulator(*plant, *context.get(),
                                                                                   Q, R, N,
-                                                                                  plant->get_actuation_input_port().get_index()));
-      std::cout << "A: " << lqr->A() << "\n";
-      std::cout << "B: " << lqr->B() << "\n";
-      std::cout << "C: " << lqr->C() << "\n";
+                                                                                  plant->get_actuation_input_port().get_index()));  //创建lqr
       std::cout << "D: " << lqr->D() << "\n";
+
       if (!FLAGS_real)
       {
         builder.Connect(plant->get_state_output_port(), lqr->get_input_port());
@@ -206,37 +206,51 @@ namespace drake
     else
     {
       std::cout << "Use PID.\n";
-      Eigen::VectorXd kp = Eigen::VectorXd::Constant(1, 20);
-      Eigen::VectorXd ki = Eigen::VectorXd::Constant(1, 0);
-      Eigen::VectorXd kd = Eigen::VectorXd::Constant(1, 4);
-      auto controller = builder.AddSystem<systems::controllers::PidController>(kp, ki, kd);
-      auto desired = builder.AddSystem<systems::ConstantVectorSource>(Eigen::Vector2d(FLAGS_theta, 0));
-      builder.Connect(desired->get_output_port(), controller->get_input_port_desired_state());
+      // Eigen::VectorXd kp = Eigen::VectorXd::Constant(1, 10);
+      // Eigen::VectorXd ki = Eigen::VectorXd::Constant(1, 0);
+      // Eigen::VectorXd kd = Eigen::VectorXd::Constant(1, 4);
+      // auto controller = builder.AddSystem<systems::controllers::PidController>(kp, ki, kd);
+      // auto desired = builder.AddSystem<systems::ConstantVectorSource>(Eigen::Vector2d(FLAGS_theta, 0));
+      // builder.Connect(desired->get_output_port(), controller->get_input_port_desired_state());
+
+      auto feedfor = builder.AddSystem<drake::lqrfeedforward>(plant, parameters);  //创建pid+前馈
+      auto command_sender = builder.AddSystem<CommandSender>(plant);  //创建command_sender
+
       if (!FLAGS_real)
       {
-        builder.Connect(plant->get_state_output_port(), controller->get_input_port_estimated_state());
-        builder.Connect(controller->get_output_port_control(), plant->get_actuation_input_port());
+        // builder.Connect(plant->get_state_output_port(), controller->get_input_port_estimated_state());
+        // builder.Connect(controller->get_output_port_control(), plant->get_actuation_input_port());
+        // builder.Connect(plant->get_state_output_port(), state_sender->get_state_input_port());
+
+        builder.Connect(plant->get_state_output_port(), feedfor->get_input_port());
+        builder.Connect(feedfor->get_output_port(0), plant->get_actuation_input_port());
         builder.Connect(plant->get_state_output_port(), state_sender->get_state_input_port());
+        builder.Connect(feedfor->get_output_port(1), command_sender->get_desired_input_port());
       }
       else
       {
-        builder.Connect(hard_plant->get_state_output_port(), controller->get_input_port_estimated_state());
-        builder.Connect(controller->get_output_port_control(), hard_plant->get_actuation_input_port());
+        // builder.Connect(hard_plant->get_state_output_port(), controller->get_input_port_estimated_state());
+        // builder.Connect(controller->get_output_port_control(), hard_plant->get_actuation_input_port());
+        // builder.Connect(hard_plant->get_state_output_port(), state_sender->get_state_input_port());
+
+        builder.Connect(hard_plant->get_state_output_port(), feedfor->get_input_port());
+        builder.Connect(feedfor->get_output_port(0), hard_plant->get_actuation_input_port());
         builder.Connect(hard_plant->get_state_output_port(), state_sender->get_state_input_port());
+        builder.Connect(feedfor->get_output_port(1), command_sender->get_desired_input_port());
       }
     }
 
-    Eigen::Matrix<double, 6, 1> disturb;
-    disturb << 0, 20, 0, 0, 0, 0;
-    auto force_disturber = builder.AddSystem<ForceDisturber>(plant->GetBodyByName(parameters.body_name()).index(), disturb, 4, 0.2, 4);
-    builder.Connect(force_disturber->get_output_port(), plant->get_applied_spatial_force_input_port());
+    Eigen::Matrix<double, 6, 1> disturb;  //扰动
+    disturb << 0, 50, 0, 0, 0, 0;
+    auto force_disturber = builder.AddSystem<ForceDisturber>(plant->GetBodyByName(parameters.body_name()).index(), disturb, 0, 0, 4);  //创建力扰动
+    builder.Connect(force_disturber->get_output_port(), plant->get_applied_spatial_force_input_port());  //连接力扰动
 
     auto diagram = builder.Build();
     auto diagram_context = diagram->CreateDefaultContext();
 
     systems::Context<double> &plant_context = diagram->GetMutableSubsystemContext(*plant, diagram_context.get());
     const multibody::RevoluteJoint<double> &joint = plant->GetJointByName<multibody::RevoluteJoint>(parameters.pin_joint_name());
-    joint.set_angle(&plant_context, FLAGS_theta);
+    joint.set_angle(&plant_context, FLAGS_theta);  //设置实物初始角度（弧度制）
     Eigen::VectorXd qv = plant->GetPositionsAndVelocities(plant_context);
     Eigen::VectorXd q0 = qv.segment(0, plant->num_positions());
     Eigen::VectorXd v0 = qv.segment(plant->num_positions(), plant->num_velocities());
@@ -281,12 +295,14 @@ void sigintHandler(int sig)
 int main(int argc, char *argv[])
 {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-  if (!lc.good())
+
+  if (!lc.good())  //lcm相关
   {
     std::cout << "Error: Lcm not good!\n";
     return -1;
   }
-  if (FLAGS_real)
+
+  if (FLAGS_real)  //实物相关
   {
     signal(SIGINT, sigintHandler);
     if (HardwarePlantInit(lc) != 0)
@@ -294,5 +310,6 @@ int main(int argc, char *argv[])
       return -2;
     }
   }
+
   return drake::do_main();
 }
