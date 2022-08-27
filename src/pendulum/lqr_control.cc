@@ -26,14 +26,22 @@
 #include "hardware_plant.h"
 #include "lcm_publish.h"
 #include "lqrfeedforward.h"
+#include <fstream>
+#include "iomanip"
 
-DEFINE_double(dt, 1.0e-3, "Control period.");
+DEFINE_double(dt, 0.5e-3, "Control period.");
 DEFINE_double(realtime, 1.0, "Target realtime rate.");
-DEFINE_double(simtime, 6e2, "Simulation time.");
-DEFINE_bool(pid, true, "Use PID.");
+DEFINE_double(simtime, 60, "Simulation time.");  //仿真时长
+DEFINE_bool(pid, false, "Use PID.");
 DEFINE_double(theta, M_PI, "Desired angle.");
 DEFINE_bool(pub, true, "Publish lcm msg");
 DEFINE_bool(real, false, "Run real");
+DEFINE_double(mass, 1.21, "Parameter mass");
+DEFINE_double(length, 0.41, "Parameter length");
+DEFINE_double(damping, 0, "Parameter damping");
+DEFINE_double(init_pos, 0, "init position");  //弧度（仿真和实物都会初始化位置）
+DEFINE_double(Q1, 100, "Q's parameter1");
+DEFINE_double(Q2, 1, "Q's parameter2");
 
 lcm::LCM lc;
 
@@ -79,6 +87,37 @@ namespace drake
       {
         lcmPublishState(&lc, "state", q_, v_, vd_, false);
       }
+
+      // static int32_t t = 0;
+      // static int32_t t2 = 0;
+      // int32_t T = 10000;
+
+      // if(t2 == 0)
+      // {
+      //   std::ofstream file;
+      //   file.open("/home/chen/Desktop/test.txt", std::ios::out | std::ios::app);
+      //   std::cout.setf(std::ios::fixed);
+      //   file << "lqr;  Q: 1000, 1000;  state: position, velocities" << std::endl;
+
+      //   file.close();
+      // }
+
+      // t++;
+      // t2++;
+      // t %= T;
+
+      // printf("%d\r",t2);
+      // if(t2 <= 5000)
+      // {
+      //     std::ofstream file;
+      //     file.open("/home/chen/Desktop/test.txt", std::ios::out | std::ios::app);
+      //     std::cout.setf(std::ios::fixed);
+      //     file << std::setfill(' ') << std::setw(4) << t2 << "   " 
+      //          << std::fixed << std::setprecision(7) << q_(0) << "   " 
+      //          << std::fixed << std::setprecision(7) << v_(0) << ""
+      //          << std::endl;
+      //     file.close();
+      // }
     }
 
     multibody::MultibodyPlant<double> *plant_;
@@ -154,7 +193,7 @@ namespace drake
     systems::DiagramBuilder<double> builder;
     
     geometry::SceneGraph<double> *scene_graph = builder.AddSystem<geometry::SceneGraph>();  //创建scene_graph
-    pendulum::PendulumParameters parameters(FLAGS_dt, 100, 0.5, 0.1);  //dt = 1e-3, mass = 1.0, length = 0.5, damping = 0.1, gravity = 9.81
+    pendulum::PendulumParameters parameters(FLAGS_dt, FLAGS_mass, FLAGS_length, FLAGS_damping);  //dt = 1e-3, mass = 1.0, length = 0.5, damping = 0.1, gravity = 9.81
     multibody::MultibodyPlant<double> *plant = builder.AddSystem(MakePendulumPlant(parameters, scene_graph));  //创建plant
     builder.Connect(plant->get_geometry_poses_output_port(), scene_graph->get_source_pose_port(plant->get_source_id().value()));  //连接plant和对应scene_graph
 
@@ -175,13 +214,13 @@ namespace drake
 
       auto context = plant->CreateDefaultContext();
       const multibody::RevoluteJoint<double> &joint = plant->GetJointByName<multibody::RevoluteJoint>(parameters.pin_joint_name());  //创建关节
-      joint.set_angle(context.get(), FLAGS_theta);  //设置关节初始角度
+      joint.set_angle(context.get(), FLAGS_theta);  //设置关节目标角度
       Eigen::VectorXd tau(plant->num_actuated_dofs());
       tau.setZero();
       plant->get_actuation_input_port().FixValue(context.get(), tau);
       Eigen::MatrixXd Q(2, 2);
-      Q << 1, 0,
-          0, 1;
+      Q << FLAGS_Q1, 0,
+          0, FLAGS_Q2;
       Eigen::MatrixXd R(1, 1);
       R << 0.1;
       auto N = Eigen::Matrix<double, 0, 0>::Zero();
@@ -189,6 +228,14 @@ namespace drake
                                                                                   Q, R, N,
                                                                                   plant->get_actuation_input_port().get_index()));  //创建lqr
       std::cout << "D: " << lqr->D() << "\n";
+      auto PD = lqr->D();
+      PD(0) /= PD(1);
+      PD(1) *= 3.14159 / 180.0 / 3276.8;
+      std::cout << "P: " << PD(0) << "  D: " << PD(1) << std::endl;
+      PD = lqr->D();
+      PD(0) *= 3.14159 / 180.0;
+      PD(1) *= 3.14159 / 180.0;
+      std::cout << "P: " << PD(0) << "  D: " << PD(1) << std::endl;
 
       if (!FLAGS_real)
       {
@@ -250,7 +297,7 @@ namespace drake
 
     systems::Context<double> &plant_context = diagram->GetMutableSubsystemContext(*plant, diagram_context.get());
     const multibody::RevoluteJoint<double> &joint = plant->GetJointByName<multibody::RevoluteJoint>(parameters.pin_joint_name());
-    joint.set_angle(&plant_context, FLAGS_theta);  //设置实物初始角度（弧度制）
+    joint.set_angle(&plant_context, FLAGS_init_pos);  //设置初始角度（弧度制）
     Eigen::VectorXd qv = plant->GetPositionsAndVelocities(plant_context);
     Eigen::VectorXd q0 = qv.segment(0, plant->num_positions());
     Eigen::VectorXd v0 = qv.segment(plant->num_positions(), plant->num_velocities());

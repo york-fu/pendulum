@@ -184,10 +184,10 @@ int8_t HardwarePlantInit(lcm::LCM &lcm_obj)
 void HardwarePlantDeInit()
 {
   std::vector<double> goal_pos(NUM_JOINT_MAX, 0);
-  // jointMoveTo(goal_pos, 60, 1.0e-3);
-  Eigen::VectorXd cmd(1);
-  cmd << 0;
-  writeJoint(1,cmd);
+  jointMoveTo(goal_pos, 60, 1.0e-3);
+  // Eigen::VectorXd cmd(1);
+  // cmd << 0;
+  // writeJoint(1,cmd);
 
   usleep(1000 * 10);
   actuators.deInit();
