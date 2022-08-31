@@ -206,10 +206,8 @@ namespace drake
     initial_state.setZero();
     DeclareDiscreteState(initial_state);
 
-    DeclareVectorInputPort("actuation", na_);
-    DeclareVectorOutputPort("state", nq_ + nv_, &HardwarePlant::Output, {this->all_state_ticket()});
-    actuation_cache_ = &DeclareCacheEntry("actuation_cache", systems::BasicVector<double>(na_), &HardwarePlant::ActuationCache,
-                                          {get_actuation_input_port().ticket()});
+    DeclareVectorOutputPort("command", nq_ + nv_, &HardwarePlant::CommandOutput, {this->all_state_ticket()});
+    DeclareVectorOutputPort("state", nq_ + nv_, &HardwarePlant::StateOutput, {this->all_state_ticket()});
     DeclarePeriodicDiscreteUpdateEvent(dt_, 0, &HardwarePlant::Update);
   }
 
@@ -223,18 +221,19 @@ namespace drake
     static struct timespec t0, t1, last_time;
     clock_gettime(CLOCK_MONOTONIC, &t0);
 
-    Eigen::VectorXd q(nq_), v(nv_), vdot(nv_), tau(na_);
-    Eigen::VectorXd qv(nq_ + nv_);
+    // Eigen::VectorXd q(nq_), v(nv_), vdot(nv_), tau(na_);
+    // Eigen::VectorXd qv(nq_ + nv_);
 
-    readJoint(na_, dt_, q, v, vdot, tau);
-    qv << q, v;
-    next_state->set_value(qv);
+    // readJoint(na_, dt_, q, v, vdot, tau);
+    // qv << q, v;
+    // next_state->set_value(qv);
+    
 
-    const auto actuation = actuation_cache_->Eval<systems::BasicVector<double>>(context).get_value();
-    writeJoint(na_, actuation);
-
-    lcmPublishState(lcm_ptr, "state", q, v, vdot, false);
-    lcmPublishVector(lcm_ptr, "state/tau", tau);
+    /* 泄力 */
+    joint_cmd[0].torqueOffset = 0;
+    joint_cmd[0].torque = 0.0;
+    joint_cmd[0].maxTorque = MAX_CURRENT;
+    actuators.setJointTorque(joint_ids, na_, joint_cmd);
 
     clock_gettime(CLOCK_MONOTONIC, &t1);
 #if 0
@@ -244,13 +243,21 @@ namespace drake
 #endif
   }
 
-  void HardwarePlant::ActuationCache(const systems::Context<double> &context, systems::BasicVector<double> *output) const
-  {
-    output->SetFromVector(get_actuation_input_port().Eval(context));
-  }
-
-  void HardwarePlant::Output(const systems::Context<double> &context, systems::BasicVector<double> *output) const
+  void HardwarePlant::CommandOutput(const systems::Context<double> &context, systems::BasicVector<double> *output) const
   {
     output->SetFromVector(context.get_discrete_state(0).value());
+  }
+
+  void HardwarePlant::StateOutput(const systems::Context<double> &context, systems::BasicVector<double> *output) const
+  {
+    Eigen::VectorXd q(nq_), v(nv_), vdot(nv_), tau(na_);
+    Eigen::VectorXd qv(nq_ + nv_);
+
+    readJoint(na_, dt_, q, v, vdot, tau);
+    q = q / 3.14159 * 180.0;
+    v = v / 3.14159 * 180.0;
+    qv << q, v;
+
+    output->SetFromVector(qv);
   }
 }; // namespace drake

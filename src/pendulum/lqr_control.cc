@@ -35,7 +35,7 @@ DEFINE_double(simtime, 60, "Simulation time.");  //仿真时长
 DEFINE_bool(pid, false, "Use PID.");
 DEFINE_double(theta, M_PI, "Desired angle.");
 DEFINE_bool(pub, true, "Publish lcm msg");
-DEFINE_bool(real, false, "Run real");
+DEFINE_bool(real, true, "Run real");
 DEFINE_double(mass, 1.21, "Parameter mass");
 DEFINE_double(length, 0.41, "Parameter length");
 DEFINE_double(damping, 0, "Parameter damping");
@@ -87,37 +87,6 @@ namespace drake
       {
         lcmPublishState(&lc, "state", q_, v_, vd_, false);
       }
-
-      // static int32_t t = 0;
-      // static int32_t t2 = 0;
-      // int32_t T = 10000;
-
-      // if(t2 == 0)
-      // {
-      //   std::ofstream file;
-      //   file.open("/home/chen/Desktop/test.txt", std::ios::out | std::ios::app);
-      //   std::cout.setf(std::ios::fixed);
-      //   file << "lqr;  Q: 1000, 1000;  state: position, velocities" << std::endl;
-
-      //   file.close();
-      // }
-
-      // t++;
-      // t2++;
-      // t %= T;
-
-      // printf("%d\r",t2);
-      // if(t2 <= 5000)
-      // {
-      //     std::ofstream file;
-      //     file.open("/home/chen/Desktop/test.txt", std::ios::out | std::ios::app);
-      //     std::cout.setf(std::ios::fixed);
-      //     file << std::setfill(' ') << std::setw(4) << t2 << "   " 
-      //          << std::fixed << std::setprecision(7) << q_(0) << "   " 
-      //          << std::fixed << std::setprecision(7) << v_(0) << ""
-      //          << std::endl;
-      //     file.close();
-      // }
     }
 
     multibody::MultibodyPlant<double> *plant_;
@@ -254,14 +223,12 @@ namespace drake
 
       /* 创建 */
       hard_plant = builder.AddSystem<HardwarePlant>(plant);  //创建hard_plant;
-      auto feedfor = builder.AddSystem<drake::lqrfeedforward>(plant, parameters);  //创建pid+前馈
       auto state_sender = builder.AddSystem<StateSender>(plant);  //创建state_sender
       auto command_sender = builder.AddSystem<CommandSender>(plant);  //创建command_sender
-      
-      builder.Connect(hard_plant->get_state_output_port(), feedfor->get_input_port());
-      builder.Connect(feedfor->get_output_port(0), hard_plant->get_actuation_input_port());
+    
+      /* 连接 */
       builder.Connect(hard_plant->get_state_output_port(), state_sender->get_state_input_port());
-      builder.Connect(feedfor->get_output_port(1), command_sender->get_desired_input_port());
+      builder.Connect(hard_plant->get_command_output_port(), command_sender->get_desired_input_port());
     }
 
     auto diagram = builder.Build();
@@ -286,7 +253,7 @@ namespace drake
       {
         q_initial_vec[i] *= (180.0 / M_PI);
       }
-      jointMoveTo(q_initial_vec, 90, FLAGS_dt);
+      jointMoveTo(q_initial_vec, 60, FLAGS_dt);
 
       systems::Context<double> &h_plant_context = diagram->GetMutableSubsystemContext(*hard_plant, diagram_context.get());
       hard_plant->Initial(h_plant_context, qv);

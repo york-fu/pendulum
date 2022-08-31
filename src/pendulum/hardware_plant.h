@@ -19,22 +19,22 @@ namespace drake
 
     HardwarePlant(multibody::MultibodyPlant<double> *plant);
 
-    const systems::InputPort<double> &get_actuation_input_port() const
+    const systems::OutputPort<double> &get_command_output_port() const
     {
-      return systems::LeafSystem<double>::get_input_port(0);
+      return systems::LeafSystem<double>::get_output_port(0);
     }
 
     const systems::OutputPort<double> &get_state_output_port() const
     {
-      return systems::LeafSystem<double>::get_output_port(0);
+      return systems::LeafSystem<double>::get_output_port(1);
     }
 
     void Initial(systems::Context<double> &context, Eigen::VectorXd qv) const;
 
   private:
     void Update(const systems::Context<double> &context, systems::DiscreteValues<double> *next_state) const;
-    void ActuationCache(const systems::Context<double> &context, systems::BasicVector<double> *output) const;
-    void Output(const systems::Context<double> &context, systems::BasicVector<double> *output) const;
+    void CommandOutput(const systems::Context<double> &context, systems::BasicVector<double> *output) const;
+    void StateOutput(const systems::Context<double> &context, systems::BasicVector<double> *output) const;
 
     multibody::MultibodyPlant<double> *plant_;
     std::unique_ptr<systems::Context<double>> plant_context_;
