@@ -17,6 +17,7 @@ set(SRCS
   ./make_pendulum_plant.cc
   ./hardware_plant.cc
   ./lqrfeedforward.cc
+  ./simulate.cc
 )
 add_executable(${PROJECT_NAME}_lqr ${SRCS} ./lqr_control.cc)
 target_link_libraries(${PROJECT_NAME}_lqr pthread gflags drake::drake elmo)

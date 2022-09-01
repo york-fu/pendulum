@@ -1,9 +1,3 @@
-#include <memory>
-#include <queue>
-#include <iostream>
-#include <ctime>
-#include <signal.h>
-#include <gflags/gflags.h>
 #include "drake/common/drake_assert.h"
 #include "drake/geometry/drake_visualizer.h"
 #include "drake/geometry/scene_graph.h"
@@ -22,39 +16,26 @@
 #include "drake/systems/lcm/lcm_subscriber_system.h"
 #include "drake/systems/primitives/adder.h"
 #include "make_pendulum_plant.h"
+
 #include "force_disturber.h"
 #include "hardware_plant.h"
 #include "lcm_publish.h"
 #include "lqrfeedforward.h"
+#include "simulate.h"
+#include "lqr_control.h"
+
+#include <memory>
+#include <queue>
+#include <iostream>
+#include <ctime>
+#include <signal.h>
+#include <gflags/gflags.h>
 #include <fstream>
-#include "iomanip"
+#include <iomanip>
 
-#include <drake/examples/pendulum/pendulum_plant.h>
-#include "drake/common/is_approx_equal_abstol.h"
-#include "drake/examples/pendulum/pendulum_geometry.h"
-#include "drake/examples/pendulum/pendulum_plant.h"
-#include "drake/geometry/drake_visualizer.h"
-#include "drake/solvers/solve.h"
-#include "drake/systems/analysis/simulator.h"
-#include "drake/systems/controllers/pid_controlled_system.h"
-#include "drake/systems/framework/diagram.h"
-#include "drake/systems/framework/diagram_builder.h"
-#include "drake/systems/primitives/trajectory_source.h"
-#include "drake/systems/trajectory_optimization/direct_collocation.h"
-
-namespace drake {
-namespace examples {
-namespace pendulum {
-
-uint8_t get_trajectory(void);
-
-}  // namespace pendulum
-}  // namespace examples
-}  // namespace drake
-
-DEFINE_double(dt, 0.5e-3, "Control period.");
+DEFINE_double(dt, 1e-3, "Control period.");
 DEFINE_double(realtime, 1.0, "Target realtime rate.");
-DEFINE_double(simtime, 2, "Simulation time.");  //仿真时长
+DEFINE_double(simtime, 10, "Simulation time.");  //仿真时长
 DEFINE_bool(pid, false, "Use PID.");
 DEFINE_double(theta, M_PI, "Desired angle.");
 DEFINE_bool(pub, true, "Publish lcm msg");
@@ -62,7 +43,7 @@ DEFINE_bool(real, false, "Run real");
 DEFINE_double(mass, 1.21, "Parameter mass");
 DEFINE_double(length, 0.41, "Parameter length");
 DEFINE_double(damping, 0, "Parameter damping");
-DEFINE_double(init_pos, 0, "init position");  //弧度（仿真和实物都会初始化位置）
+DEFINE_double(init_pos, M_PI-0.01, "init position");  //弧度（仿真和实物都会初始化位置）
 DEFINE_double(Q1, 100, "Q's parameter1");
 DEFINE_double(Q2, 1, "Q's parameter2");
 
@@ -225,9 +206,12 @@ namespace drake
       PD(1) *= 3.14159 / 180.0;
       std::cout << "P: " << PD(0) << "  D: " << PD(1) << std::endl;
 
+      /* simulate */
+      auto simulate = builder.AddSystem<Simulate>(plant);  //创建simulate
+
       /* 连接 */
-      builder.Connect(plant->get_state_output_port(), lqr->get_input_port());
-      builder.Connect(lqr->get_output_port(), plant->get_actuation_input_port());
+      builder.Connect(plant->get_state_output_port(), simulate->get_input_port());
+      builder.Connect(simulate->get_output_port(), plant->get_actuation_input_port());
 
       /* state_sender */
       // auto state_sender = builder.AddSystem<StateSender>(plant);  //创建state_sender
@@ -238,8 +222,6 @@ namespace drake
       disturb << 0, 50, 0, 0, 0, 0;
       auto force_disturber = builder.AddSystem<ForceDisturber>(plant->GetBodyByName(parameters.body_name()).index(), disturb, 0, 0, 4);  //创建力扰动
       builder.Connect(force_disturber->get_output_port(), plant->get_applied_spatial_force_input_port());  //连接力扰动
-
-      drake::examples::pendulum::get_trajectory();
     }
     /* 实物 */
     else
@@ -254,9 +236,6 @@ namespace drake
       /* 连接 */
       builder.Connect(hard_plant->get_state_output_port(), state_sender->get_state_input_port());
       builder.Connect(hard_plant->get_command_output_port(), command_sender->get_desired_input_port());
-
-      /* 轨迹优化 */
-      // drake::examples::pendulum::get_trajectory();
     }
 
     auto diagram = builder.Build();
@@ -327,96 +306,3 @@ int main(int argc, char *argv[])
 
   return drake::do_main();
 }
-
-namespace drake {
-namespace examples {
-namespace pendulum {
-
-using trajectories::PiecewisePolynomial;
-
-uint8_t get_trajectory(void)
-{
-  auto pendulum = std::make_unique<PendulumPlant<double>>();
-  pendulum->set_name("pendulum");
-  auto context = pendulum->CreateDefaultContext();
-
-  /* 模型 */
-  auto& parameters = pendulum->get_mutable_parameters(context.get());
-  parameters.set_mass(FLAGS_mass);
-  parameters.set_length(FLAGS_length);
-  parameters.set_damping(FLAGS_damping);
-
-  /* 轨迹配置 */
-  const double time_cost = 0.5;  //s
-  const double frequency = 100;  //Hz
-  const int kNumTimeSamples = (int)(time_cost * frequency);
-  const double kMinimumTimeStep = 1.0 / frequency;//0.01;
-  const double kMaximumTimeStep = 1.0 / frequency;//0.01;
-  systems::trajectory_optimization::DirectCollocation dircol(
-      pendulum.get(), *context, kNumTimeSamples, kMinimumTimeStep,
-      kMaximumTimeStep);
-  auto& prog = dircol.prog();
-
-  dircol.AddEqualTimeIntervalsConstraints();
-
-  /* 控制力矩约束 */
-  const double kTorqueLimit = 20;  // N*m.
-  const solvers::VectorXDecisionVariable& u = dircol.input();
-  dircol.AddConstraintToAllKnotPoints(-kTorqueLimit <= u(0));
-  dircol.AddConstraintToAllKnotPoints(u(0) <= kTorqueLimit);
-
-  /* 初末状态 */
-  PendulumState<double> initial_state, final_state;
-  initial_state.set_theta(M_PI_2);
-  initial_state.set_thetadot(0.0);
-  final_state.set_theta(M_PI);
-  final_state.set_thetadot(0.0);
-
-  prog.AddLinearConstraint(dircol.initial_state() == initial_state.value());
-  prog.AddLinearConstraint(dircol.final_state() == final_state.value());
-
-  /* 代偿 */
-  const double R = 10;  // Cost on input "effort".
-  dircol.AddRunningCost((R * u) * u);
-
-  /* 设置初始轨迹 */
-  const double timespan_init = 4;
-  auto traj_init_x = PiecewisePolynomial<double>::FirstOrderHold(
-      {0, timespan_init}, {initial_state.value(), final_state.value()});
-  dircol.SetInitialTrajectory(PiecewisePolynomial<double>(), traj_init_x);
-
-  // std::cout << "decision_variable: " << prog.decision_variables() << std::endl;
-
-  /* 求解 */
-  struct timespec solve_time;
-  clock_gettime(CLOCK_MONOTONIC, &solve_time);
-  double runtime = solve_time.tv_sec * 1e3 + solve_time.tv_nsec * 1e-6;
-
-  const auto result = solvers::Solve(dircol.prog());
-
-  clock_gettime(CLOCK_MONOTONIC, &solve_time);
-  runtime = solve_time.tv_sec * 1e3 + solve_time.tv_nsec * 1e-6 - runtime;
-  printf("solve_runtime: %f ms\n", runtime);
-
-  Eigen::MatrixXd status = dircol.GetStateSamples(result);
-  Eigen::VectorXd pos = status.row(0);  //rad
-  Eigen::VectorXd vel = status.row(1);  //rad/s
-  Eigen::MatrixXd output = dircol.GetInputSamples(result);  //N·m
-  // std::ofstream file;
-  // file.open("/home/chen/Desktop/test.txt", std::ios::out | std::ios::app);
-  // file << result.GetSolution() << std::endl;
-  // file.close();
-
-  /* 判断是否成功 */
-  if (!result.is_success()) {
-    std::cerr << "Failed to solve optimization for the swing-up trajectory"
-              << std::endl;
-    return 1;
-  }
-
-  return 0;
-}
-
-}  // namespace pendulum
-}  // namespace examples
-}  // namespace drake

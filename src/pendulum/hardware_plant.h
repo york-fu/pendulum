@@ -9,7 +9,7 @@
 int8_t HardwarePlantInit(lcm::LCM &lcm_obj);
 void HardwarePlantDeInit();
 void jointMoveTo(std::vector<double> &goal_pos, double speed, double dt);
-void csp_test(double dt_);
+void csp_test();
 
 namespace drake
 {

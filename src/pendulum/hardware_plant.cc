@@ -9,6 +9,7 @@
 
 
 DECLARE_bool(pub);
+DEFINE_double(dt_, 1e-3, "dt");
 
 #define NUM_JOINT_MAX 12
 #define BIT_17 (1 << 17)
@@ -202,7 +203,7 @@ namespace drake
     na_ = plant_->num_actuated_dofs();
     nq_ = plant_->num_positions();
     nv_ = plant_->num_velocities();
-    dt_ = plant_->time_step();
+    dt_ = FLAGS_dt_;
     Eigen::VectorXd initial_state(nq_ + nv_);
     initial_state.setZero();
     DeclareDiscreteState(initial_state);
@@ -225,7 +226,7 @@ namespace drake
     // qv << q, v;
     // next_state->set_value(qv);
     
-    csp_test(dt_);
+    csp_test();
 
     /* 泄力 */
     // joint_cmd[0].torqueOffset = 0;
@@ -260,17 +261,17 @@ namespace drake
   }
 }; // namespace drake
 
-void csp_test(double dt_)
+void csp_test()
 {
   Eigen::VectorXd q(1), v(1), vdot(1), tau(1);
   Eigen::VectorXd qv(1 + 1);
-  readJoint(1, dt_, q, v, vdot, tau);
+  readJoint(1, FLAGS_dt_, q, v, vdot, tau);
   
   /* 常量 */
   const double g = 9.8; // gravity
   const double rad2deg = 180./M_PI;
   const double w = 2 * M_PI;
-  const double dt = dt_;
+  const double dt = FLAGS_dt_;
   const double t_max = 1.0;
 
   /* 时间辍 */
