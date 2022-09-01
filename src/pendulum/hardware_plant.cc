@@ -7,6 +7,7 @@
 #include "utils.h"
 #include "lcm_publish.h"
 
+
 DECLARE_bool(pub);
 
 #define NUM_JOINT_MAX 12
@@ -221,19 +222,16 @@ namespace drake
     static struct timespec t0, t1, last_time;
     clock_gettime(CLOCK_MONOTONIC, &t0);
 
-    // Eigen::VectorXd q(nq_), v(nv_), vdot(nv_), tau(na_);
-    // Eigen::VectorXd qv(nq_ + nv_);
-
-    // readJoint(na_, dt_, q, v, vdot, tau);
     // qv << q, v;
     // next_state->set_value(qv);
     
+    csp_test(dt_);
 
     /* 泄力 */
-    joint_cmd[0].torqueOffset = 0;
-    joint_cmd[0].torque = 0.0;
-    joint_cmd[0].maxTorque = MAX_CURRENT;
-    actuators.setJointTorque(joint_ids, na_, joint_cmd);
+    // joint_cmd[0].torqueOffset = 0;
+    // joint_cmd[0].torque = 0.0;
+    // joint_cmd[0].maxTorque = MAX_CURRENT;
+    // actuators.setJointTorque(joint_ids, na_, joint_cmd);
 
     clock_gettime(CLOCK_MONOTONIC, &t1);
 #if 0
@@ -261,3 +259,95 @@ namespace drake
     output->SetFromVector(qv);
   }
 }; // namespace drake
+
+void csp_test(double dt_)
+{
+  Eigen::VectorXd q(1), v(1), vdot(1), tau(1);
+  Eigen::VectorXd qv(1 + 1);
+  readJoint(1, dt_, q, v, vdot, tau);
+  
+  /* 常量 */
+  const double g = 9.8; // gravity
+  const double rad2deg = 180./M_PI;
+  const double w = 2 * M_PI;
+  const double dt = dt_;
+  const double t_max = 1.0;
+
+  /* 时间辍 */
+  static int count = 0;
+  static double t = 0;
+  count ++;
+  t = count * dt;
+
+  /* 模型 */
+  const double m1 = 0.5; // kg
+  const double l1 = 0.25 + 0.04; //m
+  const double m2 = 0.65; // kg
+  const double l2 = 0.5 + 0.04; //m
+  const double m3 = 0.06;
+  const double l3 = 0.02;
+  const double I = m1*l1*l1 + m2*l2*l2 + m3*l3*l3; //0.206
+
+  /* 配置 */
+  const double A = 10;  //摆动位置幅度(单位d)
+  const double T = 0.25;
+
+  /* 轨迹 */
+  double pos;
+  double vel;
+  double acc;
+  if(t > t_max)
+  {
+    pos = 90.0;
+    vel = 0;
+    acc = 0;
+  }
+  else 
+  {
+    pos = -363.41 * t * t * t * t * t \
+          +1116.4 * t * t * t * t \
+          -1349.4 * t * t * t \
+          +692.32 * t * t \
+          -6.4006 * t \
+          +0.0545;
+    vel = -363.41 * 5 * t * t * t * t \
+          +1116.4 * 4 * t * t * t \
+          -1349.4 * 3 * t * t \
+          +692.32 * 2 * t \
+          -6.4006 * 1;
+    acc = -363.41 * 5 * 4 * t * t * t \
+          +1116.4 * 4 * 3 * t * t \
+          -1349.4 * 3 * 2 * t \
+          +692.32 * 2 * 1;
+  }
+
+  /* 状态前馈 */
+  double torque_fd = (m1*l1+m2*l2+m3*l3)*g*cos(joint_data[0].position/rad2deg);
+  // double torque_fd = (m1*l1+m2*l2+m3*l3)*g*cos(pos/rad2deg);
+
+  /* 运动前馈 */
+  double torque_move_fd = acc / rad2deg * I;
+
+  /* 打印 */
+  // joint_cmd[0].torque = torque_fd + torque_move_fd;
+
+  /* 输出 */
+  // joint_cmd_old[0] = joint_cmd[0];
+  // joint_cmd[0].position = pos;
+  // joint_cmd[0].velocityOffset = vel;
+  // joint_cmd[0].torqueOffset = (torque_fd + torque_move_fd) / 1.44;
+  // joint_cmd[0].maxTorque = MAX_TORQUE;
+  // EM_setPositions(joint_ids, 1, joint_cmd);
+
+  /* 泄力 */
+  joint_cmd[0].torqueOffset = 0;
+  joint_cmd[0].torque = 0;
+  joint_cmd[0].maxTorque = 0;
+  actuators.setJointTorque(joint_ids, 1, joint_cmd);
+
+  /* 仅重力补偿 */
+  // joint_cmd[0].torque = torque_fd / 1.44;
+  // joint_cmd[0].maxTorque = MAX_TORQUE;
+  // actuators.setJointTorque(joint_ids, 1, joint_cmd);
+}
+
