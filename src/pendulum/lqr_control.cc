@@ -35,17 +35,19 @@
 
 DEFINE_double(dt, 1e-3, "Control period.");
 DEFINE_double(realtime, 1.0, "Target realtime rate.");
-DEFINE_double(simtime, 10, "Simulation time.");  //仿真时长
-DEFINE_bool(pid, false, "Use PID.");
-DEFINE_double(theta, M_PI, "Desired angle.");
 DEFINE_bool(pub, true, "Publish lcm msg");
-DEFINE_bool(real, false, "Run real");
+DEFINE_double(simtime, 0.5, "Simulation time.");  //仿真时长
+DEFINE_double(theta, M_PI, "Desired angle.");  //目标角度
+DEFINE_bool(real, false, "Run real");  //实物
 DEFINE_double(mass, 1.21, "Parameter mass");
 DEFINE_double(length, 0.41, "Parameter length");
 DEFINE_double(damping, 0, "Parameter damping");
-DEFINE_double(init_pos, M_PI-0.01, "init position");  //弧度（仿真和实物都会初始化位置）
-DEFINE_double(Q1, 100, "Q's parameter1");
+DEFINE_double(init_pos, M_PI_2, "init position");  //弧度（仿真和实物都会初始化位置）
+DEFINE_double(Q1, 2000, "Q's parameter1");
 DEFINE_double(Q2, 1, "Q's parameter2");
+DEFINE_double(traj_time, 0.2, "traj_time");  //轨迹时长(s)
+DEFINE_double(traj_point_num, 20, "traj_point_num");  //轨迹点数
+DEFINE_double(traj_torque_limit, 40, "traj_torque_limit");  //轨迹里的扭矩限制
 
 lcm::LCM lc;
 
@@ -196,7 +198,6 @@ namespace drake
       auto N = Eigen::Matrix<double, 0, 0>::Zero();
       auto lqr = builder.AddSystem(systems::controllers::LinearQuadraticRegulator(*plant, *context.get(), Q, R, N,
                                                                                   plant->get_actuation_input_port().get_index()));  //创建lqr
-      std::cout << "D: " << lqr->D() << "\n";
       auto PD = lqr->D();
       PD(0) /= PD(1);
       PD(1) *= 3.14159 / 180.0 / 3276.8;
@@ -205,17 +206,18 @@ namespace drake
       PD(0) *= 3.14159 / 180.0;
       PD(1) *= 3.14159 / 180.0;
       std::cout << "P: " << PD(0) << "  D: " << PD(1) << std::endl;
+      PD = lqr->D();
 
       /* simulate */
-      auto simulate = builder.AddSystem<Simulate>(plant);  //创建simulate
+      auto simulate = builder.AddSystem<Simulate>(plant, -PD(0), -PD(1));  //创建simulate
 
       /* 连接 */
       builder.Connect(plant->get_state_output_port(), simulate->get_input_port());
       builder.Connect(simulate->get_output_port(), plant->get_actuation_input_port());
 
       /* state_sender */
-      // auto state_sender = builder.AddSystem<StateSender>(plant);  //创建state_sender
-      // builder.Connect(plant->get_state_output_port(), state_sender->get_state_input_port());
+      auto state_sender = builder.AddSystem<StateSender>(plant);  //创建state_sender
+      builder.Connect(plant->get_state_output_port(), state_sender->get_state_input_port());
 
       /* 扰动 */
       Eigen::Matrix<double, 6, 1> disturb;

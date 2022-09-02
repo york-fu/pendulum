@@ -16,5 +16,8 @@ DECLARE_double(damping);
 DECLARE_double(init_pos);
 DECLARE_double(Q1);
 DECLARE_double(Q2);
+DECLARE_double(traj_time);
+DECLARE_double(traj_point_num);
+DECLARE_double(traj_torque_limit);
 
 #endif

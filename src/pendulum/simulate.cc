@@ -7,6 +7,7 @@
 #include "utils.h"
 #include "lcm_publish.h"
 #include "lqr_control.h"
+#include <fstream>
 
 namespace drake {
 namespace examples {
@@ -14,7 +15,7 @@ namespace pendulum {
 
 using trajectories::PiecewisePolynomial;
 
-uint8_t get_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::VectorXd* tor)
+uint8_t get_swingup_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::VectorXd* tor)
 {
   auto pendulum = std::make_unique<PendulumPlant<double>>();
   pendulum->set_name("pendulum");
@@ -27,11 +28,10 @@ uint8_t get_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::Vector
   parameters.set_damping(FLAGS_damping);
 
   /* 轨迹配置 */
-  const double time_cost = 1;  //s
-  const double frequency = 100;  //Hz
-  const int kNumTimeSamples = (int)(time_cost * frequency);
-  const double kMinimumTimeStep = 1.0 / frequency;//0.01;
-  const double kMaximumTimeStep = 1.0 / frequency;//0.01;
+  const double traj_time = FLAGS_traj_time;  //s
+  const int kNumTimeSamples = FLAGS_traj_point_num;
+  const double kMinimumTimeStep = traj_time / kNumTimeSamples;
+  const double kMaximumTimeStep = traj_time / kNumTimeSamples;
   systems::trajectory_optimization::DirectCollocation dircol(
       pendulum.get(), *context, kNumTimeSamples, kMinimumTimeStep,
       kMaximumTimeStep);
@@ -40,7 +40,7 @@ uint8_t get_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::Vector
   dircol.AddEqualTimeIntervalsConstraints();
 
   /* 控制力矩约束 */
-  const double kTorqueLimit = 20;  // N*m.
+  const double kTorqueLimit = FLAGS_traj_torque_limit;  // N*m.
   const solvers::VectorXDecisionVariable& u = dircol.input();
   dircol.AddConstraintToAllKnotPoints(-kTorqueLimit <= u(0));
   dircol.AddConstraintToAllKnotPoints(u(0) <= kTorqueLimit);
@@ -60,11 +60,10 @@ uint8_t get_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::Vector
   dircol.AddRunningCost((R * u) * u);
 
   /* 设置初始轨迹 */
-  const double timespan_init = time_cost;
+  const double timespan_init = traj_time;
   auto traj_init_x = PiecewisePolynomial<double>::FirstOrderHold(
       {0, timespan_init}, {initial_state.value(), final_state.value()});
   dircol.SetInitialTrajectory(PiecewisePolynomial<double>(), traj_init_x);
-  // std::cout << "traj_init_x.value(0.51):" << traj_init_x.value(0.51) << std::endl;
 
   /* 求解 */
   struct timespec solve_time;
@@ -77,40 +76,21 @@ uint8_t get_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::Vector
   runtime = solve_time.tv_sec * 1e3 + solve_time.tv_nsec * 1e-6 - runtime;
   printf("solve_runtime: %f ms\n", runtime);
 
-  Eigen::VectorXd t;
-  t.resize(kNumTimeSamples);
-  for(int i = 0; i < kNumTimeSamples; i++)
-  {
-    t(i) = kMinimumTimeStep * i;
-  }
-  Eigen::MatrixXd status = dircol.GetStateSamples(result);
-  *pos = status.row(0);  //rad
-  *vel = status.row(1);  //rad/s
-  Eigen::MatrixXd input = dircol.GetInputSamples(result);
-  *tor = input.row(0);  //N·m
-  // auto traj_pos = PiecewisePolynomial<double>::FirstOrderHold(t, pos.transpose());
-  // auto traj_vel = PiecewisePolynomial<double>::FirstOrderHold(t, vel.transpose());
-  // auto traj_tor = PiecewisePolynomial<double>::FirstOrderHold(t, tor.transpose());
-  // std::ofstream file;
-  // file.open("/home/chen/Desktop/test.txt", std::ios::out | std::ios::app);
-  // for(int i = 0; i < 1000; i++)
-  // {
-  //   file << "t: " << i << " ms"
-  //       << "  pos: " << traj_pos.value(i*0.001)
-  //       << "  vel: " << traj_vel.value(i*0.001)
-  //       << "  tor: " << traj_tor.value(i*0.001) << std::endl;
-  // }
-  // file.close();
-
-  /* 打印 */
-  // std::cout << "traj_pos.value(1):" << traj_pos.value(1) << std::endl;
-
   /* 判断是否成功 */
   if (!result.is_success()) {
     std::cerr << "Failed to solve optimization for the swing-up trajectory"
               << std::endl;
+    pos->setZero(kNumTimeSamples, 1);
+    vel->setZero(kNumTimeSamples, 1);
+    tor->setZero(kNumTimeSamples, 1);
     return 1;
   }
+
+  Eigen::MatrixXd status = dircol.GetStateSamples(result);
+  *pos = status.row(0);  //rad  列向量
+  *vel = status.row(1);  //rad/s
+  Eigen::MatrixXd input = dircol.GetInputSamples(result);
+  *tor = input.row(0);  //N·m
 
   return 0;
 }
@@ -119,17 +99,42 @@ uint8_t get_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::Vector
 }  // namespace examples
 }  // namespace drake
 
-
 namespace drake
 {
-  Simulate::Simulate(multibody::MultibodyPlant<double> *plant) : plant_(plant)
+  Simulate::Simulate(multibody::MultibodyPlant<double> *plant, double kp_, double kd_) : plant_(plant)
   {
     plant_context_ = plant_->CreateDefaultContext();
 
-    DeclareVectorInputPort("input", 2);  //输入
-    DeclareVectorOutputPort("output", 1, &Simulate::OUT);  //输出
+    na = plant_->num_actuated_dofs();
+    nq = plant_->num_positions();
+    nv = plant_->num_velocities();
 
-    drake::examples::pendulum::get_trajectory(&pos, &vel, &tor);
+    kp << kp_;
+    kd << kd_;
+
+    DeclareVectorInputPort("input", nq+nv);  //输入
+    DeclareVectorOutputPort("output", na, &Simulate::OUT);  //输出
+
+    q_desire.resize(nq);
+    v_desire.resize(nv);
+    q_measure.resize(nq);
+    v_measure.resize(nv);
+    q_err.resize(nq);
+    v_err.resize(nv);
+    pout.resize(nq);
+    dout.resize(nv);
+    torque_move_fd.resize(pout.size());
+    torque_fd.resize(pout.size());
+    out.resize(pout.size());
+    out.setZero();
+
+    drake::examples::pendulum::get_swingup_trajectory(&pos, &vel, &tor);
+
+    traj_t.resize(FLAGS_traj_point_num);
+    for(int i = 0; i < FLAGS_traj_point_num; i++)
+    {
+      traj_t(i) = FLAGS_traj_time / FLAGS_traj_point_num * i;
+    }
   }
 
   void Simulate::OUT(const systems::Context<double>& context, systems::BasicVector<double>* output) const
@@ -137,7 +142,76 @@ namespace drake
     Eigen::VectorBlock<VectorX<double>> output_vector = output->get_mutable_value();
     output_vector.setZero();
 
-    output_vector << 0;
+    /* 常量 */
+    const double g = 9.81; // gravity
+    const double rad2deg = 180./M_PI;
+
+    /* 时间戳 */
+    t += FLAGS_dt;
+
+    /* 轨迹 */
+    static auto traj_pos = examples::pendulum::PiecewisePolynomial<double>::FirstOrderHold(traj_t, pos.transpose());
+    static auto traj_vel = examples::pendulum::PiecewisePolynomial<double>::FirstOrderHold(traj_t, vel.transpose());
+    static auto traj_tor = examples::pendulum::PiecewisePolynomial<double>::FirstOrderHold(traj_t, tor.transpose());
+
+    /* 目标值 */
+    q_desire = traj_pos.value(t);
+    v_desire = traj_vel.value(t);
+    if(t > FLAGS_traj_time)
+    {
+      q_desire << FLAGS_theta;
+      v_desire << 0;
+    }
+
+    /* 状态值 */
+    const auto qv = get_input_port().Eval(context);
+    q_measure = qv.segment(0, nq);  //位置（仿真是rad）
+    v_measure = qv.segment(nq, nv);  //速度（仿真是rad/s）
+
+    /* 误差值 */
+    q_err = q_desire - q_measure;
+    v_err = v_desire - v_measure;
+
+    /* 位置速度pp控制 */
+    pout = kp * q_err;
+    dout = kd * v_err;
+    
+    /* 运动前馈 */
+    torque_move_fd = traj_tor.value(t);
+    if(t > FLAGS_traj_time)
+    {
+      torque_move_fd << 0;
+    }
+
+    /* 状态前馈 */
+    torque_fd << (FLAGS_mass*FLAGS_length)*g*sin(q_measure[0]);
+
+    /* 输出 */
+    out = torque_move_fd + pout + dout;// + torque_fd;
+    if(out(0) > 44.12)
+    {
+      output_vector << 44.12;
+    }
+    else if(out(0) < -44.12)
+    {
+      output_vector << -44.12;
+    }
+    else 
+    {
+      output_vector << out;
+    }
+
+    /* 打印 */
+  //   std::ofstream file;
+  //   file.open("/home/chen/Desktop/test.txt", std::ios::out | std::ios::app);
+  //   file << t
+  //       << "  " << q_measure(0)
+  //       << "  " << v_measure(0)
+  //       << "  " << output_vector(0)
+  //       << "  " << torque_move_fd(0) 
+  //       << "  " << pout + dout << std::endl;
+  //       // << "  " << traj_tor.value(t)
+  //   file.close();
   }
 
 }; // namespace drake
