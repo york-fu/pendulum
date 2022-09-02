@@ -9,7 +9,6 @@
 int8_t HardwarePlantInit(lcm::LCM &lcm_obj);
 void HardwarePlantDeInit();
 void jointMoveTo(std::vector<double> &goal_pos, double speed, double dt);
-void csp_test();
 
 namespace drake
 {
@@ -36,6 +35,7 @@ namespace drake
     void Update(const systems::Context<double> &context, systems::DiscreteValues<double> *next_state) const;
     void CommandOutput(const systems::Context<double> &context, systems::BasicVector<double> *output) const;
     void StateOutput(const systems::Context<double> &context, systems::BasicVector<double> *output) const;
+    void csp_test()  const;
 
     multibody::MultibodyPlant<double> *plant_;
     std::unique_ptr<systems::Context<double>> plant_context_;
@@ -46,5 +46,13 @@ namespace drake
     uint32_t nv_f_;
     double dt_;
     const systems::CacheEntry *actuation_cache_{};
+    Eigen::VectorXd traj_t;  //s
+    Eigen::VectorXd vec_pos;  //rad
+    Eigen::VectorXd vec_vel;  //rad/s
+    Eigen::VectorXd vec_tor;  //N·m
+    mutable double pos;
+    mutable double vel;
+    mutable double acc;
+    mutable double tor;
   };
 } // namespace drake

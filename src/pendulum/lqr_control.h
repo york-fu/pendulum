@@ -19,5 +19,7 @@ DECLARE_double(Q2);
 DECLARE_double(traj_time);
 DECLARE_double(traj_point_num);
 DECLARE_double(traj_torque_limit);
+DECLARE_double(init_position);
+DECLARE_double(final_position);
 
 #endif

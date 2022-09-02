@@ -21,7 +21,7 @@ namespace pendulum {
 
 using trajectories::PiecewisePolynomial;
 
-uint8_t get_swingup_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen::VectorXd* tor)
+uint8_t get_swingup_trajectory(Eigen::VectorXd& pos, Eigen::VectorXd& vel, Eigen::VectorXd& tor)
 {
   auto pendulum = std::make_unique<PendulumPlant<double>>();
   pendulum->set_name("pendulum");
@@ -57,9 +57,9 @@ uint8_t get_swingup_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen
 
   /* 初末状态 */
   PendulumState<double> initial_state, final_state;
-  initial_state.set_theta(M_PI_2);
+  initial_state.set_theta(FLAGS_init_position);
   initial_state.set_thetadot(0.0);
-  final_state.set_theta(M_PI);
+  final_state.set_theta(FLAGS_final_position);
   final_state.set_thetadot(0.0);
 
   prog.AddLinearConstraint(dircol.initial_state() == initial_state.value());
@@ -90,17 +90,17 @@ uint8_t get_swingup_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen
   if (!result.is_success()) {
     std::cerr << "Failed to solve optimization for the swing-up trajectory"
               << std::endl;
-    pos->setZero(kNumTimeSamples, 1);
-    vel->setZero(kNumTimeSamples, 1);
-    tor->setZero(kNumTimeSamples, 1);
+    pos.setZero(kNumTimeSamples, 1);
+    vel.setZero(kNumTimeSamples, 1);
+    tor.setZero(kNumTimeSamples, 1);
     return 1;
   }
 
   Eigen::MatrixXd status = dircol.GetStateSamples(result);
-  *pos = status.row(0);  //rad  列向量
-  *vel = status.row(1);  //rad/s
+  pos = status.row(0);  //rad  列向量
+  vel = status.row(1);  //rad/s
   Eigen::MatrixXd input = dircol.GetInputSamples(result);
-  *tor = input.row(0);  //N·m
+  tor = input.row(0);  //N·m
 
   /* 测试 */
   // std::unique_ptr<drake::systems::LinearSystem<double>> linear_model = Linearize(*pendulum.get(), *context);
@@ -142,7 +142,7 @@ namespace drake
     out.resize(pout.size());
     out.setZero();
 
-    drake::examples::pendulum::get_swingup_trajectory(&pos, &vel, &tor);
+    drake::examples::pendulum::get_swingup_trajectory(pos, vel, tor);
 
     traj_t.resize(FLAGS_traj_point_num);
     for(int i = 0; i < FLAGS_traj_point_num; i++)

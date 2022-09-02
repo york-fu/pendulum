@@ -24,7 +24,7 @@ namespace drake {
 namespace examples {
 namespace pendulum {
 
-uint8_t get_swingup_trajectory(Eigen::VectorXd &pos, Eigen::VectorXd &vel, Eigen::VectorXd &tor);
+uint8_t get_swingup_trajectory(Eigen::VectorXd& pos, Eigen::VectorXd& vel, Eigen::VectorXd& tor);
 
 }  // namespace pendulum
 }  // namespace examples

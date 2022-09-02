@@ -36,18 +36,20 @@
 DEFINE_double(dt, 1e-3, "Control period.");
 DEFINE_double(realtime, 1.0, "Target realtime rate.");
 DEFINE_bool(pub, true, "Publish lcm msg");
-DEFINE_double(simtime, 0.5, "Simulation time.");  //仿真时长
+DEFINE_double(simtime, 60, "Simulation time.");  //仿真时长
 DEFINE_double(theta, M_PI, "Desired angle.");  //目标角度
 DEFINE_bool(real, false, "Run real");  //实物
 DEFINE_double(mass, 1.21, "Parameter mass");
 DEFINE_double(length, 0.41, "Parameter length");
 DEFINE_double(damping, 0, "Parameter damping");
-DEFINE_double(init_pos, M_PI_2, "init position");  //弧度（仿真和实物都会初始化位置）
+DEFINE_double(init_pos, 0, "init position");  //弧度（仿真和实物都会初始化位置）
 DEFINE_double(Q1, 2000, "Q's parameter1");
 DEFINE_double(Q2, 1, "Q's parameter2");
-DEFINE_double(traj_time, 0.2, "traj_time");  //轨迹时长(s)
-DEFINE_double(traj_point_num, 20, "traj_point_num");  //轨迹点数
+DEFINE_double(traj_time, 0.6, "traj_time");  //轨迹时长(s)
+DEFINE_double(traj_point_num, 600, "traj_point_num");  //轨迹点数
 DEFINE_double(traj_torque_limit, 40, "traj_torque_limit");  //轨迹里的扭矩限制
+DEFINE_double(init_position, M_PI_2, "init_position");  //以仿真为准
+DEFINE_double(final_position, M_PI, "final_position");  //以仿真为准
 
 lcm::LCM lc;
 
