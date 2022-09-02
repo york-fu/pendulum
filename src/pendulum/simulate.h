@@ -65,4 +65,24 @@ namespace drake
   };
 } // namespace drake
 
+namespace drake {
+namespace systems {
+namespace controllers {
+
+template <typename T>
+
+void mpc(const System< double> & model_, 
+              const Context<T>& base_context_, 
+              const VectorX<T>& current_state, 
+              double time_horizon,  //预测范围
+              double time_period,  //周期
+              Eigen::MatrixXd Q,
+              Eigen::MatrixXd R
+              );
+
+}  // namespace controllers
+}  // namespace systems
+}  // namespace drake
+
+
 #endif

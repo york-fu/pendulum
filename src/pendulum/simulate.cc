@@ -9,6 +9,12 @@
 #include "lqr_control.h"
 #include <fstream>
 
+#include "drake/common/eigen_types.h"
+#include "drake/solvers/solve.h"
+#include "drake/systems/trajectory_optimization/direct_transcription.h"
+#include <drake/systems/framework/event.h>
+#include <drake/systems/framework/cache.h>
+
 namespace drake {
 namespace examples {
 namespace pendulum {
@@ -20,6 +26,10 @@ uint8_t get_swingup_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen
   auto pendulum = std::make_unique<PendulumPlant<double>>();
   pendulum->set_name("pendulum");
   auto context = pendulum->CreateDefaultContext();
+  Eigen::VectorXd temp;
+  temp.resize(1);
+  temp << 0;
+  pendulum->get_input_port().FixValue(context.get(), temp);
 
   /* 模型 */
   auto& parameters = pendulum->get_mutable_parameters(context.get());
@@ -91,6 +101,10 @@ uint8_t get_swingup_trajectory(Eigen::VectorXd* pos, Eigen::VectorXd* vel, Eigen
   *vel = status.row(1);  //rad/s
   Eigen::MatrixXd input = dircol.GetInputSamples(result);
   *tor = input.row(0);  //N·m
+
+  /* 测试 */
+  // std::unique_ptr<drake::systems::LinearSystem<double>> linear_model = Linearize(*pendulum.get(), *context);
+  // drake::systems::trajectory_optimization::DirectTranscription dirtran(linear_model.get(), *context, 10);
 
   return 0;
 }
@@ -215,3 +229,52 @@ namespace drake
   }
 
 }; // namespace drake
+
+namespace drake {
+namespace systems {
+namespace controllers {
+
+template <typename T>
+void mpc(const System< double> & model_, 
+              const Context<T>& base_context_, 
+              const VectorX<T>& current_state, 
+              double time_horizon,  //预测范围
+              double time_period,  //周期
+              Eigen::MatrixXd Q,
+              Eigen::MatrixXd R
+              )
+{
+  const int kNumSampleTimes = static_cast<int>(time_horizon / time_period + 0.5);
+
+  // std::unique_ptr<LinearSystem<double>> linear_model = Linearize(model_, base_context_);
+
+  // std::cout << linear_model.get()->GetUniquePeriodicDiscreteUpdateAttribute()->period_sec() << std::endl;
+  // linear_model.get()->GetUniquePeriodicDiscreteUpdateAttribute()->set_period_sec(time_period);
+  // linear_model.get()->GetUniquePeriodicDiscreteUpdateAttribute()->set_offset_sec(0);
+  // linear_model.get()->GetUniquePeriodicDiscreteUpdateAttribute()->SetInitialValue(1);
+  // std::cout << linear_model.get()->GetUniquePeriodicDiscreteUpdateAttribute().has_value() << std::endl;
+
+  // drake::systems::trajectory_optimization::DirectTranscription dirtran(linear_model.get(), base_context_, kNumSampleTimes);
+  // auto& prog = dirtran.prog();
+
+  // const auto state_error = dirtran.state();
+  // const auto input_error = dirtran.input();
+
+  // dirtran.AddRunningCost(state_error.transpose() * Q * state_error +
+  //                        input_error.transpose() * R * input_error);
+
+  // const VectorX<T> state_ref = base_context_.get_discrete_state().get_vector().CopyToVector();
+  // prog.AddLinearConstraint(dirtran.initial_state() == current_state - state_ref);
+
+  // const auto result = Solve(prog);
+
+  // if(result.is_success())
+  // {
+  //   std::cout << "success!\n";
+  // }
+}
+
+}  // namespace controllers
+}  // namespace systems
+}  // namespace drake
+
